@@ -4,11 +4,18 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from bson import ObjectId
 
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
 from .database import books_collection, reviews_collection
 from . import schemas
 from .nlp.sentiment import analyze_sentiment
 from .nlp.keywords import extract_keywords
 
+
+# ============================================================
+#  FASTAPI CONFIG
+# ============================================================
 
 app = FastAPI(
     title="Book Review Recommender & NLP (MongoDB)",
@@ -22,7 +29,7 @@ origins = [
     "http://localhost:5173",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:5173",
-    "*"  # en desarrollo
+    "*"  # Solo en desarrollo
 ]
 
 app.add_middleware(
@@ -39,10 +46,12 @@ async def root():
     return {"message": "API de reseñas de libros con NLP y MongoDB funcionando"}
 
 
-# ===== Helpers =====
+# ============================================================
+#  HELPERS
+# ============================================================
 
 def object_id_or_404(id_str: str) -> ObjectId:
-    """Convierte un string a ObjectId o lanza 400 si no es válido."""
+    """Convierte un string a ObjectId o lanza error 400 si no es válido."""
     try:
         return ObjectId(id_str)
     except Exception:
@@ -50,6 +59,7 @@ def object_id_or_404(id_str: str) -> ObjectId:
 
 
 def document_to_book_out(doc) -> schemas.BookOut:
+    """Convierte un documento Mongo → BookOut"""
     return schemas.BookOut(
         id=str(doc["_id"]),
         title=doc.get("title", ""),
@@ -59,6 +69,7 @@ def document_to_book_out(doc) -> schemas.BookOut:
 
 
 def document_to_review_out(doc) -> schemas.ReviewOut:
+    """Convierte un documento Mongo → ReviewOut"""
     return schemas.ReviewOut(
         id=str(doc["_id"]),
         username=doc.get("username"),
@@ -68,7 +79,9 @@ def document_to_review_out(doc) -> schemas.ReviewOut:
     )
 
 
-# ===== Libros =====
+# ============================================================
+#  ENDPOINTS: LIBROS
+# ============================================================
 
 @app.post("/books", response_model=schemas.BookOut)
 async def create_book(book: schemas.BookCreate):
@@ -100,18 +113,20 @@ async def get_book(book_id: str):
     return document_to_book_out(doc)
 
 
-# ===== Reseñas =====
+# ============================================================
+#  ENDPOINTS: RESEÑAS
+# ============================================================
 
 @app.post("/books/{book_id}/reviews", response_model=schemas.ReviewOut)
 async def create_review(book_id: str, review: schemas.ReviewCreate):
     book_oid = object_id_or_404(book_id)
 
-    # Verificar que exista el libro
+    # Confirmar existencia del libro
     book_doc = await books_collection.find_one({"_id": book_oid})
     if not book_doc:
         raise HTTPException(status_code=404, detail="Book not found")
 
-    # Analizar sentimiento del texto
+    # Análisis de sentimiento
     label, score = analyze_sentiment(review.text)
 
     new_review = {
@@ -132,30 +147,29 @@ async def create_review(book_id: str, review: schemas.ReviewCreate):
 async def list_reviews(book_id: str):
     book_oid = object_id_or_404(book_id)
 
-    # (opcional) verificar que exista el libro
     book_doc = await books_collection.find_one({"_id": book_oid})
     if not book_doc:
         raise HTTPException(status_code=404, detail="Book not found")
 
     cursor = reviews_collection.find({"book_id": book_oid})
-    reviews: List[schemas.ReviewOut] = []
+    reviews = []
     async for doc in cursor:
         reviews.append(document_to_review_out(doc))
 
     return reviews
 
 
-# ===== Resumen emocional =====
+# ============================================================
+#  ENDPOINT: RESUMEN EMOCIONAL
+# ============================================================
 
 @app.get("/books/{book_id}/summary")
 async def get_book_summary(book_id: str):
-
     try:
         book_obj = ObjectId(book_id)
     except:
         raise HTTPException(status_code=400, detail="Invalid book ID")
 
-    # Obtener todas las reseñas del libro
     reviews_cursor = reviews_collection.find({"book_id": book_obj})
     reviews = await reviews_cursor.to_list(length=None)
 
@@ -165,10 +179,11 @@ async def get_book_summary(book_id: str):
             "total_reviews": 0,
             "positive": 0,
             "negative": 0,
+            "avg_sentiment_score": 0,
             "keywords": []
         }
 
-    # Contar sentimientos
+    # Conteo de sentimientos
     positive_count = sum(1 for r in reviews if r["sentiment_label"] == "positive")
     negative_count = sum(1 for r in reviews if r["sentiment_label"] == "negative")
 
@@ -177,7 +192,11 @@ async def get_book_summary(book_id: str):
     positive_percent = round((positive_count / total) * 100, 2)
     negative_percent = round((negative_count / total) * 100, 2)
 
-    # TF-IDF necesita una lista de textos, NO un string
+    # Promedio del puntaje de sentimiento
+    sentiment_scores = [float(r.get("sentiment_score", 0)) for r in reviews]
+    avg_sentiment_score = round(sum(sentiment_scores) / total, 4)
+
+    # Extracción de keywords TF-IDF
     texts = [r["text"] for r in reviews]
     keywords = extract_keywords(texts, top_k=5)
 
@@ -186,79 +205,66 @@ async def get_book_summary(book_id: str):
         "total_reviews": total,
         "positive": positive_percent,
         "negative": negative_percent,
+        "avg_sentiment_score": avg_sentiment_score,
         "keywords": keywords
     }
 
-# ===== Recomendaciones =====
 
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-
+# ============================================================
+#  ENDPOINT: RECOMENDACIONES
+# ============================================================
 
 @app.get("/books/{book_id}/recommendations")
 async def recommend_books(book_id: str):
 
-    # Validar id
     try:
         target_book_oid = ObjectId(book_id)
     except:
         raise HTTPException(status_code=400, detail="Invalid book ID")
 
-    # Obtener todos los libros
     all_books_cursor = books_collection.find({})
     all_books = await all_books_cursor.to_list(length=None)
 
     if len(all_books) < 2:
-        return {
-            "book_id": book_id,
-            "recommendations": []
-        }
+        return {"book_id": book_id, "recommendations": []}
 
-    # Crear texto combinado por libro
+    # Construir textos por libro
     book_texts = {}
     for book in all_books:
         book_oid = book["_id"]
 
-        # Obtener reseñas del libro actual
         reviews_cursor = reviews_collection.find({"book_id": book_oid})
         reviews = await reviews_cursor.to_list(length=None)
 
-        # Si no hay reseñas → usar descripción
         if len(reviews) > 0:
             combined_text = " ".join([r["text"] for r in reviews])
         else:
             combined_text = book.get("description", "")
 
-        # Guardamos texto procesado
         book_texts[str(book_oid)] = combined_text
 
-    # Orden estable: lista de IDs y lista de textos
+    # TF-IDF corpus
     book_ids = list(book_texts.keys())
     corpus = [book_texts[_id] for _id in book_ids]
 
-    # Crear matriz TF-IDF
     vectorizer = TfidfVectorizer(stop_words="english")
     tfidf_matrix = vectorizer.fit_transform(corpus)
 
-    # Calcular similitud entre todos los libros
     similarities = cosine_similarity(tfidf_matrix)
 
-    # Índice del libro consultado
     try:
         target_index = book_ids.index(book_id)
     except:
         raise HTTPException(status_code=404, detail="Book not found")
 
-    # Obtener similitudes, excluyendo al mismo libro
-    similarity_scores = list(enumerate(similarities[target_index]))
     similarity_scores = [
-        (idx, score) for idx, score in similarity_scores if idx != target_index
+        (idx, score)
+        for idx, score in enumerate(similarities[target_index])
+        if idx != target_index
     ]
 
-    # Ordenar por similitud alta → baja
     similarity_scores.sort(key=lambda x: x[1], reverse=True)
 
-    # Construir recomendaciones top 5
     recommendations = []
     for idx, score in similarity_scores[:5]:
         similar_book_id = book_ids[idx]
@@ -270,7 +276,4 @@ async def recommend_books(book_id: str):
             "similarity": round(float(score), 3)
         })
 
-    return {
-        "book_id": book_id,
-        "recommendations": recommendations
-    }
+    return {"book_id": book_id, "recommendations": recommendations}
