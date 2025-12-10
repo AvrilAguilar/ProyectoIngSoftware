@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 
 # ===== Reseñas =====
@@ -44,3 +44,38 @@ class BookSummary(BaseModel):
     negative_pct: float
     neutral_pct: float
     keywords: List[str]
+
+
+# ===== Usuarios =====
+
+class UserCreate(BaseModel):
+    username: str
+    email: str
+    password: str
+
+
+class UserOut(BaseModel):
+    id: str
+    username: str
+    email: str
+
+
+# ===== Quiz =====
+
+class QuizAnswers(BaseModel):
+    favorite_genre: str
+    action_level: str  # "low", "medium", "high"
+    keywords: List[str]
+
+
+class QuizOut(BaseModel):
+    user_id: str
+    quiz: Dict  # mejor que "dict" porque usa tipado pydantic
+
+
+# ===== Recomendaciones =====
+
+class RecommendationOut(BaseModel):
+    book_id: str
+    title: str
+    score: int
