@@ -9,17 +9,16 @@ router = APIRouter(prefix="/quiz", tags=["Quiz"])
 
 
 @router.post("/save", response_model=QuizOut)
-async def save_quiz(answers: QuizAnswers, user=Depends(get_current_user)):
-
+async def save_quiz(
+    answers: QuizAnswers,
+    user=Depends(get_current_user)
+):
     quiz_dict = answers.dict()
 
-    update_result = await users_collection.update_one(
+    await users_collection.update_one(
         {"_id": user["_id"]},
         {"$set": {"quiz": quiz_dict}}
     )
-
-    if update_result.modified_count == 0:
-        raise HTTPException(status_code=400, detail="Quiz not saved")
 
     return QuizOut(
         user_id=str(user["_id"]),
@@ -30,7 +29,6 @@ async def save_quiz(answers: QuizAnswers, user=Depends(get_current_user)):
 @router.get("/me", response_model=QuizOut)
 async def get_my_quiz(user=Depends(get_current_user)):
     quiz = user.get("quiz")
-
     if not quiz:
         raise HTTPException(status_code=404, detail="Quiz not completed")
 

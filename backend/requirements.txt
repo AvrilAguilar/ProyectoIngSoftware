@@ -5,3 +5,4 @@ scikit-learn
 motor
 python-jose
 passlib[bcrypt]
+Unidecode

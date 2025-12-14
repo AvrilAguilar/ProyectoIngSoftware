@@ -1,7 +1,7 @@
 # backend/app/auth.py
 
 from fastapi import APIRouter, HTTPException, Depends
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from passlib.hash import pbkdf2_sha256
 from jose import jwt, JWTError
 from bson import ObjectId
@@ -14,10 +14,7 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 SECRET_KEY = "SUPER_SECRET_KEY"
 ALGORITHM = "HS256"
 
-oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl="/auth/login",
-    scheme_name="JWT"
-)
+security = HTTPBearer()
 
 
 def user_doc_to_out(doc):
@@ -30,9 +27,7 @@ def user_doc_to_out(doc):
 
 @router.post("/register", response_model=UserOut)
 async def register(user: UserCreate):
-
-    exists = await users_collection.find_one({"email": user.email})
-    if exists:
+    if await users_collection.find_one({"email": user.email}):
         raise HTTPException(status_code=400, detail="Email already registered")
 
     hashed = pbkdf2_sha256.hash(user.password)
@@ -50,21 +45,17 @@ async def register(user: UserCreate):
     return user_doc_to_out(new_user)
 
 
-@router.post("/login", response_model=dict)   # 👈 **FIX IMPORTANTE**
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-
-    user = await users_collection.find_one({"email": form_data.username})
-    if not user:
-        raise HTTPException(status_code=400, detail="Invalid credentials")
-
-    if not pbkdf2_sha256.verify(form_data.password, user["password"]):
+@router.post("/login")
+async def login(data: dict):
+    user = await users_collection.find_one({"email": data.get("email")})
+    if not user or not pbkdf2_sha256.verify(data.get("password"), user["password"]):
         raise HTTPException(status_code=400, detail="Invalid credentials")
 
     token = jwt.encode(
         {
             "user_id": str(user["_id"]),
             "email": user["email"],
-            "username": user["username"]
+            "username": user["username"],
         },
         SECRET_KEY,
         algorithm=ALGORITHM
@@ -73,14 +64,13 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     return {"access_token": token, "token_type": "bearer"}
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
     try:
+        token = credentials.credentials
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = payload.get("user_id")
-
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
 
         user = await users_collection.find_one({"_id": ObjectId(user_id)})
         if not user:
