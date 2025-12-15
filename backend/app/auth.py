@@ -45,10 +45,13 @@ async def register(user: UserCreate):
     return user_doc_to_out(new_user)
 
 
+from .schemas import LoginRequest
+
 @router.post("/login")
-async def login(data: dict):
-    user = await users_collection.find_one({"email": data.get("email")})
-    if not user or not pbkdf2_sha256.verify(data.get("password"), user["password"]):
+async def login(data: LoginRequest):
+    user = await users_collection.find_one({"email": data.email})
+
+    if not user or not pbkdf2_sha256.verify(data.password, user["password"]):
         raise HTTPException(status_code=400, detail="Invalid credentials")
 
     token = jwt.encode(
@@ -61,7 +64,11 @@ async def login(data: dict):
         algorithm=ALGORITHM
     )
 
-    return {"access_token": token, "token_type": "bearer"}
+    return {
+        "access_token": token,
+        "token_type": "bearer"
+    }
+
 
 
 async def get_current_user(
