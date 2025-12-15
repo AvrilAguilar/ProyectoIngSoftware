@@ -1,8 +1,10 @@
-from pydantic import BaseModel
-from typing import Optional, List
+from pydantic import BaseModel, EmailStr
+from typing import Optional, List, Dict
 
 
-# ===== Reseñas =====
+# ======================
+# RESEÑAS
+# ======================
 
 class ReviewBase(BaseModel):
     username: Optional[str] = None
@@ -19,7 +21,9 @@ class ReviewOut(ReviewBase):
     sentiment_score: float
 
 
-# ===== Libros =====
+# ======================
+# LIBROS
+# ======================
 
 class BookBase(BaseModel):
     title: str
@@ -35,7 +39,9 @@ class BookOut(BookBase):
     id: str
 
 
-# ===== Resumen emocional =====
+# ======================
+# RESUMEN EMOCIONAL
+# ======================
 
 class BookSummary(BaseModel):
     book_id: str
@@ -44,3 +50,49 @@ class BookSummary(BaseModel):
     negative_pct: float
     neutral_pct: float
     keywords: List[str]
+
+
+# ======================
+# USUARIOS (AUTH)
+# ======================
+
+class UserCreate(BaseModel):
+    username: str
+    email: EmailStr
+    password: str
+
+
+class UserOut(BaseModel):
+    id: str
+    username: str
+    email: EmailStr
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+# ======================
+# QUIZ
+# ======================
+
+class QuizAnswers(BaseModel):
+    favorite_genre: str
+    action_level: str  # "low" | "medium" | "high"
+    keywords: List[str]
+
+
+class QuizOut(BaseModel):
+    user_id: str
+    quiz: Dict[str, object]
+
+
+# ======================
+# RECOMENDACIONES
+# ======================
+
+class RecommendationOut(BaseModel):
+    book_id: str
+    title: str
+    score: int

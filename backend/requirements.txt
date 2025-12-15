@@ -3,3 +3,7 @@ uvicorn[standard]
 pydantic
 scikit-learn
 motor
+python-jose
+passlib[bcrypt]
+Unidecode
+pydantic
